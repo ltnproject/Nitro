@@ -278,7 +278,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
 import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-analytics.js";
 import {
-  getFirestore, collection, addDoc, query, orderBy, limit, getDocs, serverTimestamp
+  getFirestore, collection, addDoc, query, orderBy, limit, getDocs, serverTimestamp, where
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
 import {
   getAuth, signInAnonymously, onAuthStateChanged
@@ -561,13 +561,16 @@ async function saveResult(result){
 async function loadHistory(){
   if(!currentUid) return;
   try{
-    const q = query(collection(db, "speedtests"), orderBy("createdAt","desc"), limit(10));
+    const q = query(
+      collection(db, "speedtests"), 
+      where("uid", "==", currentUid),
+      orderBy("createdAt","desc"), 
+      limit(10)
+    );
     const snap = await getDocs(q);
     const rows = [];
     snap.forEach(doc=>{
-      const d = doc.data();
-      if(d.uid !== currentUid) return;
-      rows.push(d);
+      rows.push(doc.data());
     });
     const tbody = document.getElementById('historyBody');
     if(rows.length === 0){
