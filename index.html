@@ -12,6 +12,7 @@
     --nitro-dim: #9FE02B;
     --volt: #3DE0FF;
     --danger: #FF5C6C;
+    --warn: #FFB020;
 
     --bg: #0A0D10;
     --bg-2: #10151A;
@@ -158,9 +159,25 @@
     border-top:1px solid var(--line);
   }
   .meta-strip b{ color:var(--text-dim); font-weight:600; }
+  .badge-3bb{
+    display:none; align-items:center; gap:5px;
+    background:rgba(255,176,32,0.14); color:var(--warn);
+    border:1px solid rgba(255,176,32,0.4);
+    border-radius:999px; padding:2px 10px; font-weight:700;
+    font-size:11px; letter-spacing:0.5px; text-transform:uppercase;
+    margin-left:6px;
+  }
+
+  /* ---------- Community stats ---------- */
+  .community{ margin-top:48px; }
+  .community h2{
+    font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; margin:0 0 4px;
+  }
+  html[lang="th"] .community h2{ font-family:'Noto Sans Thai',sans-serif; }
+  .community .sub{ color:var(--text-faint); font-size:13px; margin:0 0 16px; }
 
   /* ---------- History ---------- */
-  .history{ margin-top:56px; }
+  .history{ margin-top:48px; }
   .history h2{
     font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; margin:0 0 4px;
   }
@@ -176,6 +193,13 @@
   tbody td.dlc{ color:var(--nitro-dim); font-weight:600; }
   tbody td.ulc{ color:var(--volt); font-weight:600; }
   .empty-row td{ text-align:center; padding:26px 12px; color:var(--text-faint); }
+  .history .clear-btn{
+    background:none; border:1px solid var(--line); color:var(--text-faint);
+    border-radius:999px; padding:6px 14px; font-size:12px; font-weight:600;
+    cursor:pointer; font-family:inherit; margin-top:12px;
+    transition:all .2s ease;
+  }
+  .history .clear-btn:hover{ color:var(--danger); border-color:var(--danger); }
 
   footer{
     text-align:center; padding:30px 20px 40px; color:var(--text-faint); font-size:12px;
@@ -249,11 +273,26 @@
     <div><b data-i18n="server">Server</b>: <span id="serverName">Cloudflare Edge (nearest)</span></div>
     <div><b data-i18n="tested">Tested</b>: <span id="testedAt">—</span></div>
     <div><b data-i18n="id">Test ID</b>: <span id="testId">—</span></div>
+    <div>
+      <b data-i18n="isp">ISP</b>: <span id="ispDetected">—</span>
+      <span class="badge-3bb" id="ispBadge"><span data-i18n="badge3bb">3BB DETECTED</span></span>
+    </div>
+  </div>
+
+  <div class="community">
+    <h2 data-i18n="communityTitle">Community today</h2>
+    <p class="sub" data-i18n="communitySub">Aggregated anonymously across all Nitro users — no personal results are stored, only totals.</p>
+    <div class="metrics" style="margin-top:0;">
+      <div class="metric"><div class="m-label" data-i18n="statUsersLabel">USERS TODAY</div><div class="m-val" id="statUsers">–</div></div>
+      <div class="metric"><div class="m-label" data-i18n="statTestsLabel">TESTS TODAY</div><div class="m-val" id="statTests">–</div></div>
+      <div class="metric dl"><div class="m-label" data-i18n="statAvgDlLabel">AVG DOWNLOAD</div><div class="m-val" id="statAvgDl">–<span class="m-unit">Mbps</span></div></div>
+      <div class="metric ul"><div class="m-label" data-i18n="statAvgUlLabel">AVG UPLOAD</div><div class="m-val" id="statAvgUl">–<span class="m-unit">Mbps</span></div></div>
+    </div>
   </div>
 
   <div class="history">
     <h2 data-i18n="historyTitle">Your recent results</h2>
-    <p class="sub" data-i18n="historySub">Saved automatically to Nitro cloud (Firestore).</p>
+    <p class="sub" data-i18n="historySub">Saved locally on this device only — nothing is uploaded.</p>
     <table>
       <thead>
         <tr>
@@ -267,6 +306,7 @@
         <tr class="empty-row"><td colspan="4" data-i18n="noHistory">No tests yet — run your first one above.</td></tr>
       </tbody>
     </table>
+    <button class="clear-btn" id="clearHistoryBtn" data-i18n="clearHistory">Clear local history</button>
   </div>
 </main>
 
@@ -278,7 +318,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
 import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-analytics.js";
 import {
-  getFirestore, collection, addDoc, query, orderBy, limit, getDocs, serverTimestamp, where
+  getFirestore, doc, getDoc, setDoc, increment, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
 import {
   getAuth, signInAnonymously, onAuthStateChanged
@@ -301,7 +341,7 @@ const auth = getAuth(app);
 
 let currentUid = null;
 onAuthStateChanged(auth, (user) => {
-  if (user) { currentUid = user.uid; loadHistory(); }
+  if (user) { currentUid = user.uid; loadCommunityStats(); }
 });
 signInAnonymously(auth).catch(err => console.error("Anon auth failed:", err));
 
@@ -318,10 +358,16 @@ const dict = {
     subtitle:"One tap. Ping, download, and upload — measured live, saved to your history.",
     start:"START TEST", testing:"TESTING…",
     ping:"PING", jitter:"JITTER", download:"DOWNLOAD", upload:"UPLOAD",
-    server:"Server", tested:"Tested", id:"Test ID",
-    historyTitle:"Your recent results", historySub:"Saved automatically to Nitro cloud (Firestore).",
+    server:"Server", tested:"Tested", id:"Test ID", isp:"ISP",
+    badge3bb:"3BB DETECTED",
+    communityTitle:"Community today",
+    communitySub:"Aggregated anonymously across all Nitro users — no personal results are stored, only totals.",
+    statUsersLabel:"USERS TODAY", statTestsLabel:"TESTS TODAY",
+    statAvgDlLabel:"AVG DOWNLOAD", statAvgUlLabel:"AVG UPLOAD",
+    historyTitle:"Your recent results", historySub:"Saved locally on this device only — nothing is uploaded.",
     colTime:"Time", colPing:"Ping", colDl:"Download", colUl:"Upload",
     noHistory:"No tests yet — run your first one above.",
+    clearHistory:"Clear local history",
     footer:"NITRO Speed Test — measurements are estimates and may vary by device, browser, and network conditions.",
     phasePing:"MEASURING PING", phaseDown:"MEASURING DOWNLOAD", phaseUp:"MEASURING UPLOAD", phaseDone:"DONE",
     mbps:"MBPS"
@@ -332,10 +378,16 @@ const dict = {
     subtitle:"แตะครั้งเดียว วัดปิง ดาวน์โหลด และอัปโหลดแบบเรียลไทม์ พร้อมบันทึกประวัติให้อัตโนมัติ",
     start:"เริ่มทดสอบ", testing:"กำลังทดสอบ…",
     ping:"ปิง", jitter:"จิตเตอร์", download:"ดาวน์โหลด", upload:"อัปโหลด",
-    server:"เซิร์ฟเวอร์", tested:"ทดสอบเมื่อ", id:"รหัสการทดสอบ",
-    historyTitle:"ผลการทดสอบล่าสุดของคุณ", historySub:"บันทึกอัตโนมัติขึ้นคลาวด์ของ Nitro (Firestore)",
+    server:"เซิร์ฟเวอร์", tested:"ทดสอบเมื่อ", id:"รหัสการทดสอบ", isp:"ผู้ให้บริการ",
+    badge3bb:"ตรวจพบเครือข่าย 3BB",
+    communityTitle:"สถิติชุมชนวันนี้",
+    communitySub:"รวมข้อมูลแบบไม่ระบุตัวตนจากผู้ใช้ Nitro ทุกคน — ไม่มีการเก็บผลการทดสอบส่วนตัว มีแค่ยอดรวม",
+    statUsersLabel:"ผู้ใช้วันนี้", statTestsLabel:"จำนวนการทดสอบวันนี้",
+    statAvgDlLabel:"ดาวน์โหลดเฉลี่ย", statAvgUlLabel:"อัปโหลดเฉลี่ย",
+    historyTitle:"ผลการทดสอบล่าสุดของคุณ", historySub:"บันทึกไว้ในเครื่องนี้เท่านั้น — ไม่มีการอัปโหลดข้อมูล",
     colTime:"เวลา", colPing:"ปิง", colDl:"ดาวน์โหลด", colUl:"อัปโหลด",
     noHistory:"ยังไม่มีผลการทดสอบ — ลองทดสอบครั้งแรกด้านบน",
+    clearHistory:"ล้างประวัติในเครื่อง",
     footer:"NITRO Speed Test — ผลลัพธ์เป็นค่าประมาณ อาจแตกต่างกันตามอุปกรณ์ เบราว์เซอร์ และสภาพเครือข่าย",
     phasePing:"กำลังวัดปิง", phaseDown:"กำลังวัดดาวน์โหลด", phaseUp:"กำลังวัดอัปโหลด", phaseDone:"เสร็จสิ้น",
     mbps:"เมกะบิต/วินาที"
@@ -351,6 +403,7 @@ function applyLang(){
   document.getElementById('langLabel').textContent = lang === 'en' ? 'EN / TH' : 'TH / EN';
   document.getElementById('gaugeUnit').textContent = dict[lang].mbps;
   if(!testRunning) document.getElementById('startBtn').textContent = dict[lang].start;
+  renderLocalHistory();
 }
 document.getElementById('langToggle').addEventListener('click', ()=>{
   lang = lang === 'en' ? 'th' : 'en';
@@ -403,6 +456,30 @@ function setGaugeVal(val, unitLabel){
   if(unitLabel) document.getElementById('gaugeUnit').textContent = unitLabel;
 }
 
+/* ============ ISP / 3BB detection ============ */
+async function detectISP(){
+  try{
+    const resp = await fetch('https://ipapi.co/json/');
+    if(!resp.ok) throw new Error('ISP lookup failed: ' + resp.status);
+    const data = await resp.json();
+    const rawName = data.org || data.asn_org || data.isp || '';
+    const norm = rawName.toLowerCase();
+    const is3BB = /3\s*-?\s*bb|triple\s*t\s*broadband|tripplet|tt\s*&\s*t\s*broadband/.test(norm);
+
+    const ispEl = document.getElementById('ispDetected');
+    ispEl.textContent = rawName || '—';
+
+    if(is3BB){
+      const badge = document.getElementById('ispBadge');
+      badge.style.display = 'inline-flex';
+    }
+  }catch(e){
+    console.warn('ISP detection unavailable:', e);
+    document.getElementById('ispDetected').textContent = '—';
+  }
+}
+detectISP();
+
 /* ============ Speed test engine ============ */
 const DOWN_URL = "https://speed.cloudflare.com/__down";
 const UP_URL   = "https://speed.cloudflare.com/__up";
@@ -432,7 +509,6 @@ async function measureDownload(durationMs=8000){
   let lastUpdate = start;
 
   while(performance.now() - start < durationMs){
-    const reqStart = performance.now();
     const resp = await fetch(`${DOWN_URL}?bytes=${chunkBytes}&x=${Math.random()}`, {cache:"no-store"});
     const reader = resp.body.getReader();
     while(true){
@@ -491,6 +567,10 @@ async function measureUpload(durationMs=8000){
 
 /* ============ Orchestration ============ */
 document.getElementById('startBtn').addEventListener('click', runTest);
+document.getElementById('clearHistoryBtn').addEventListener('click', ()=>{
+  localStorage.removeItem('nitro-history');
+  renderLocalHistory();
+});
 
 async function runTest(){
   if(testRunning) return;
@@ -528,8 +608,12 @@ async function runTest(){
     const testId = Math.random().toString(36).slice(2,10);
     document.getElementById('testId').textContent = testId;
 
-    await saveResult({ ping, jitter, download: dl, upload: ul, testId });
-    await loadHistory();
+    const result = { time: now.toISOString(), ping, jitter, download: dl, upload: ul, testId };
+
+    saveLocalHistory(result);
+    renderLocalHistory();
+
+    recordAggregateStats(result).then(loadCommunityStats);
   }catch(err){
     console.error(err);
     document.getElementById('gaugePhase').textContent = "ERROR";
@@ -540,53 +624,94 @@ async function runTest(){
   }
 }
 
-/* ============ Firestore ============ */
-async function saveResult(result){
-  if(!currentUid) return;
+/* ============ Local history (device-only, no cloud) ============ */
+const HISTORY_KEY = 'nitro-history';
+const HISTORY_MAX = 20;
+
+function getLocalHistory(){
   try{
-    await addDoc(collection(db, "speedtests"), {
-      uid: currentUid,
-      ping: Math.round(result.ping * 10)/10,
-      jitter: Math.round(result.jitter * 10)/10,
-      download: Math.round(result.download * 10)/10,
-      upload: Math.round(result.upload * 10)/10,
-      testId: result.testId,
-      userAgent: navigator.userAgent,
-      lang: lang,
-      createdAt: serverTimestamp()
-    });
-  }catch(e){ console.error("Failed to save result:", e); }
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  }catch(e){ return []; }
 }
 
-async function loadHistory(){
-  if(!currentUid) return;
+function saveLocalHistory(result){
+  const list = getLocalHistory();
+  list.unshift(result);
+  if(list.length > HISTORY_MAX) list.length = HISTORY_MAX;
   try{
-    const q = query(
-      collection(db, "speedtests"), 
-      where("uid", "==", currentUid),
-      orderBy("createdAt","desc"), 
-      limit(10)
-    );
-    const snap = await getDocs(q);
-    const rows = [];
-    snap.forEach(doc=>{
-      rows.push(doc.data());
-    });
-    const tbody = document.getElementById('historyBody');
-    if(rows.length === 0){
-      tbody.innerHTML = `<tr class="empty-row"><td colspan="4">${dict[lang].noHistory}</td></tr>`;
-      return;
-    }
-    tbody.innerHTML = rows.map(d=>{
-      const time = d.createdAt ? new Date(d.createdAt.toMillis()).toLocaleString() : "—";
-      return `<tr>
-        <td>${time}</td>
-        <td>${d.ping ?? '–'} ms</td>
-        <td class="dlc">${d.download ?? '–'} Mbps</td>
-        <td class="ulc">${d.upload ?? '–'} Mbps</td>
-      </tr>`;
-    }).join("");
-  }catch(e){ console.error("Failed to load history:", e); }
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+  }catch(e){ console.error('Failed to save local history:', e); }
+}
+
+function renderLocalHistory(){
+  const list = getLocalHistory();
+  const tbody = document.getElementById('historyBody');
+  if(!tbody) return;
+  if(list.length === 0){
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="4">${dict[lang].noHistory}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = list.map(d=>{
+    const time = d.time ? new Date(d.time).toLocaleString() : "—";
+    return `<tr>
+      <td>${time}</td>
+      <td>${d.ping != null ? d.ping.toFixed(0) : '–'} ms</td>
+      <td class="dlc">${d.download != null ? d.download.toFixed(1) : '–'} Mbps</td>
+      <td class="ulc">${d.upload != null ? d.upload.toFixed(1) : '–'} Mbps</td>
+    </tr>`;
+  }).join("");
+}
+
+/* ============ Firebase: aggregate-only stats ============ */
+function getDateKey(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+async function recordAggregateStats(result){
+  const dateKey = getDateKey();
+  const countedFlagKey = 'nitro-counted-' + dateKey;
+  const alreadyCountedToday = !!localStorage.getItem(countedFlagKey);
+
+  const statsRef = doc(db, "dailyStats", dateKey);
+  const updates = {
+    testCount: increment(1),
+    sumPing: increment(result.ping || 0),
+    sumJitter: increment(result.jitter || 0),
+    sumDownload: increment(result.download || 0),
+    sumUpload: increment(result.upload || 0),
+    lastUpdated: serverTimestamp()
+  };
+  if(!alreadyCountedToday){
+    updates.userCount = increment(1);
+  }
+
+  try{
+    await setDoc(statsRef, updates, { merge: true });
+    if(!alreadyCountedToday) localStorage.setItem(countedFlagKey, '1');
+  }catch(e){
+    console.error("Failed to record aggregate stats:", e);
+  }
+}
+
+async function loadCommunityStats(){
+  const dateKey = getDateKey();
+  try{
+    const snap = await getDoc(doc(db, "dailyStats", dateKey));
+    const d = snap.exists() ? snap.data() : {};
+    const testCount = d.testCount || 0;
+    const userCount = d.userCount || 0;
+    const avgDl = testCount ? (d.sumDownload / testCount) : null;
+    const avgUl = testCount ? (d.sumUpload / testCount) : null;
+
+    document.getElementById('statUsers').textContent = userCount;
+    document.getElementById('statTests').textContent = testCount;
+    document.getElementById('statAvgDl').innerHTML = (avgDl != null ? avgDl.toFixed(1) : '–') + '<span class="m-unit">Mbps</span>';
+    document.getElementById('statAvgUl').innerHTML = (avgUl != null ? avgUl.toFixed(1) : '–') + '<span class="m-unit">Mbps</span>';
+  }catch(e){
+    console.error("Failed to load community stats:", e);
+  }
 }
 </script>
 </body>
